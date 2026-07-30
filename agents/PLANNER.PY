@@ -45,9 +45,13 @@ def _run_async(coro):
 
 
 def _get_llm() -> LLM:
+    # CrewAI's LLM class routes through LiteLLM, which supports Gemini
+    # natively via the "gemini/<model>" prefix + GEMINI_API_KEY env var.
+    # Swap the model string below if the team wants a different Gemini
+    # tier (e.g. "gemini/gemini-2.5-pro" for higher quality, slower/pricier).
     return LLM(
-        model="anthropic/claude-sonnet-4-6",
-        api_key=os.environ["ANTHROPIC_API_KEY"],
+        model=os.environ.get("GEMINI_MODEL", "gemini/gemini-2.0-flash"),
+        api_key=os.environ["GEMINI_API_KEY"],
         temperature=0.3,
     )
 
