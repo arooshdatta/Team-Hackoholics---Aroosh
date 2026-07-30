@@ -1,12 +1,17 @@
-"""
-db/connection.py
-
-Creates the shared asyncpg connection pool. main.py's lifespan calls
-create_pool() once at startup and passes the pool to queries.init_pool().
-"""
-
 import asyncpg
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
 
-async def create_pool(database_url: str) -> asyncpg.Pool:
-    return await asyncpg.create_pool(database_url, min_size=1, max_size=10)
+_pool = None
+
+async def get_pool():
+    global _pool
+    if _pool is None:
+        _pool = await asyncpg.create_pool(
+            dsn=os.environ["DATABASE_URL"],
+            min_size=1,
+            max_size=10,
+        )
+    return _pool
