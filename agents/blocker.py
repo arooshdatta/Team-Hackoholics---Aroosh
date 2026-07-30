@@ -24,9 +24,32 @@ import asyncio
 from crewai import Agent, Task, Crew, Process
 from db import queries
 
-# Gemini via CrewAI's LiteLLM "gemini/" API-key provider (not Vertex).
-# Requires GEMINI_API_KEY in the environment — see .env.
-MODEL = "gemini/gemini-2.5-flash"
+import os
+from crewai.llm import LLM
+from db.connection import get_main_loop
+
+def _get_llm() -> LLM:
+    return LLM(
+        model=os.environ.get("GEMINI_MODEL", "gemini/gemini-2.0-flash"),
+        api_key=os.environ["GEMINI_API_KEY"],
+        temperature=0.3,
+    )
+
+def _run_async(coro):
+    main_loop = get_main_loop()
+    if main_loop and main_loop.is_running():
+        future = asyncio.run_coroutine_threadsafe(coro, main_loop)
+        return future.result()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        import nest_asyncio
+
+        nest_asyncio.apply()
+        return loop.run_until_complete(coro)
+    return asyncio.run(coro)
 
 EXPECTED_JSON_SHAPE = """{
   "blocked_tasks": [{"task_id": 0, "reason": "string"}],
@@ -53,7 +76,7 @@ def _build_agent() -> Agent:
             "blocked makes the alert meaningless, so you only flag what the "
             "evidence actually supports."
         ),
-        llm=MODEL,
+        llm=_get_llm(),
         verbose=False,
         allow_delegation=False,
     )
@@ -105,12 +128,12 @@ def run_blocker_check(team_id: int) -> dict:
     scheduler.py, or the manual /trigger-reminder/{team_id} endpoint should
     call.
     """
-    team = asyncio.run(queries.get_team_by_id(team_id))
+    team = _run_async(queries.get_team_by_id(team_id))
     if team is None:
         raise ValueError(f"run_blocker_check called with unknown team_id={team_id}")
 
-    tasks = asyncio.run(queries.get_tasks(team_id))
-    recent_checkins = asyncio.run(queries.get_recent_checkins(team_id, limit=20))
+    tasks = _run_async(queries.get_tasks(team_id))
+    recent_checkins = _run_async(queries.get_recent_checkins(team_id, limit=20))
 
     blocker_context = {
         "tasks": [
@@ -149,9 +172,12 @@ def run_blocker_check(team_id: int) -> dict:
         task_id = bt.get("task_id")
         if isinstance(task_id, int):
             try:
-                asyncio.run(queries.update_task_status(task_id, "blocked"))
+                _run_async(queries.update_task_status(task_id, "blocked"))
             except Exception as e:
                 print(f"[blocker] could not mark task_id={task_id} as blocked: {e}")
+
+    return parsed
+
 
     return parsed
 

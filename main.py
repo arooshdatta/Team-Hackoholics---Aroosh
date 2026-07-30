@@ -34,8 +34,8 @@ load_dotenv()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    database_url = os.environ["DATABASE_URL"]
-    pool = await connection.create_pool(database_url)
+    database_url = os.environ.get("DATABASE_URL")
+    pool = await connection.get_pool(database_url)
     queries.init_pool(pool)
 
     with open("db/schema.sql") as f:
@@ -80,7 +80,7 @@ async def _extract_onboarding_info(team_id: int, text: str) -> None:
     )
     try:
         response = litellm.completion(
-            model="gemini/gemini-2.5-flash",
+            model=os.environ.get("GEMINI_MODEL", "gemini/gemini-2.0-flash"),
             messages=[{"role": "user", "content": prompt}],
         )
         raw = response["choices"][0]["message"]["content"].strip()
@@ -105,9 +105,10 @@ async def _extract_onboarding_info(team_id: int, text: str) -> None:
     hours = parsed.get("deadline_hours_from_now")
     # Always set SOME deadline so the team doesn't get stuck re-triggering
     # onboarding forever if extraction fails — default to 24h out.
-    update_fields["deadline"] = datetime.utcnow() + timedelta(hours=hours or 24)
+    update_fields["deadline"] = datetime.now() + timedelta(hours=hours or 24)
 
     await queries.update_team(team_id, **update_fields)
+
 
 
 # ---------------------------------------------------------------------------

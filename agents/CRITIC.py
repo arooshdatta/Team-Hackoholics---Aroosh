@@ -29,20 +29,24 @@ from crewai.llm import LLM
 from db import queries
 
 
+from db.connection import get_main_loop
+
+
 # --------------------------------------------------------------------------
 # Async bridge — db/queries.py is asyncpg-based (async), but the contract in
 # section 4 requires run_critic() to be a plain sync function so P2 can call
 # it without awaiting. This bridges the two.
 # --------------------------------------------------------------------------
 def _run_async(coro):
+    main_loop = get_main_loop()
+    if main_loop and main_loop.is_running():
+        future = asyncio.run_coroutine_threadsafe(coro, main_loop)
+        return future.result()
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
     if loop and loop.is_running():
-        # We're already inside an event loop (e.g. called from an async
-        # FastAPI route without being awaited properly). Use nest_asyncio
-        # as a safety net rather than crashing.
         import nest_asyncio
 
         nest_asyncio.apply()
@@ -53,8 +57,6 @@ def _run_async(coro):
 def _get_llm() -> LLM:
     # CrewAI's LLM class routes through LiteLLM, which supports Gemini
     # natively via the "gemini/<model>" prefix + GEMINI_API_KEY env var.
-    # Swap the model string below if the team wants a different Gemini
-    # tier (e.g. "gemini/gemini-2.5-pro" for higher quality, slower/pricier).
     return LLM(
         model=os.environ.get("GEMINI_MODEL", "gemini/gemini-2.0-flash"),
         api_key=os.environ["GEMINI_API_KEY"],
@@ -63,31 +65,10 @@ def _get_llm() -> LLM:
 
 
 def _fetch_team_context(team_id: int) -> dict:
-    """
-    NOTE FOR THE GROUP: section 4 only specifies `get_team(chat_id)`, keyed
-    by chat_id — not team_id. P2 calls run_critic(team_id), so this module
-    needs the team row by team_id. Until P1 adds a `get_team_by_id(team_id)`
-    helper to db/queries.py, this falls back to a raw query so P3 isn't
-    blocked. Raise this at the hour-2 sync.
-    """
-    if hasattr(queries, "get_team_by_id"):
-        team = _run_async(queries.get_team_by_id(team_id))
-    else:
-        team = _run_async(_fallback_get_team_by_id(team_id))
-
+    team = _run_async(queries.get_team_by_id(team_id))
     tasks = _run_async(queries.get_tasks(team_id))
     checkins = _run_async(queries.get_checkins(team_id))
     return {"team": team or {}, "tasks": tasks or [], "checkins": checkins or []}
-
-
-async def _fallback_get_team_by_id(team_id: int) -> dict | None:
-    """Temporary shim until db/queries.py exposes get_team_by_id(team_id)."""
-    pool = getattr(queries, "pool", None)
-    if pool is None:
-        return None
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM teams WHERE id = $1", team_id)
-        return dict(row) if row else None
 
 
 def _build_agent() -> Agent:
@@ -187,13 +168,14 @@ def run_critic(team_id: int) -> dict:
     _run_async(
         queries.update_team(
             team_id,
-            mvp_features=json.dumps(result["mvp_features"]),
-            cut_features=json.dumps(result["cut_features"]),
-            missing_pieces=json.dumps(result["missing_pieces"]),
+            mvp_features=result["mvp_features"],
+            cut_features=result["cut_features"],
+            missing_pieces=result["missing_pieces"],
         )
     )
 
     return result
+
 
 
 if __name__ == "__main__":

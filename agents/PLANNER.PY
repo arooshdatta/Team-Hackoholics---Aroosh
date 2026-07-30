@@ -31,9 +31,16 @@ from crewai.llm import LLM
 from db import queries
 
 
+from db.connection import get_main_loop
+
+
 def _run_async(coro):
+    main_loop = get_main_loop()
+    if main_loop and main_loop.is_running():
+        future = asyncio.run_coroutine_threadsafe(coro, main_loop)
+        return future.result()
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
     if loop and loop.is_running():
@@ -47,8 +54,6 @@ def _run_async(coro):
 def _get_llm() -> LLM:
     # CrewAI's LLM class routes through LiteLLM, which supports Gemini
     # natively via the "gemini/<model>" prefix + GEMINI_API_KEY env var.
-    # Swap the model string below if the team wants a different Gemini
-    # tier (e.g. "gemini/gemini-2.5-pro" for higher quality, slower/pricier).
     return LLM(
         model=os.environ.get("GEMINI_MODEL", "gemini/gemini-2.0-flash"),
         api_key=os.environ["GEMINI_API_KEY"],
@@ -57,23 +62,9 @@ def _get_llm() -> LLM:
 
 
 def _fetch_team_context(team_id: int) -> dict:
-    """See the same NOTE FOR THE GROUP in agents/critic.py re: get_team_by_id."""
-    if hasattr(queries, "get_team_by_id"):
-        team = _run_async(queries.get_team_by_id(team_id))
-    else:
-        team = _run_async(_fallback_get_team_by_id(team_id))
-
+    team = _run_async(queries.get_team_by_id(team_id))
     existing_tasks = _run_async(queries.get_tasks(team_id))
     return {"team": team or {}, "existing_tasks": existing_tasks or []}
-
-
-async def _fallback_get_team_by_id(team_id: int) -> dict | None:
-    pool = getattr(queries, "pool", None)
-    if pool is None:
-        return None
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM teams WHERE id = $1", team_id)
-        return dict(row) if row else None
 
 
 def _build_agent() -> Agent:
@@ -182,9 +173,10 @@ def run_planner(team_id: int) -> dict:
         )
 
     # Write roadmap into teams table.
-    _run_async(queries.update_team(team_id, roadmap=json.dumps(result["roadmap"])))
+    _run_async(queries.update_team(team_id, roadmap=result["roadmap"]))
 
     return result
+
 
 
 if __name__ == "__main__":

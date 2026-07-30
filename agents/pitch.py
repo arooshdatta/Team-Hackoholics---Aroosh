@@ -23,9 +23,32 @@ import asyncio
 from crewai import Agent, Task, Crew, Process
 from db import queries
 
-# Gemini via CrewAI's LiteLLM "gemini/" API-key provider (not Vertex).
-# Requires GEMINI_API_KEY in the environment — see .env.
-MODEL = "gemini/gemini-2.5-flash"
+import os
+from crewai.llm import LLM
+from db.connection import get_main_loop
+
+def _get_llm() -> LLM:
+    return LLM(
+        model=os.environ.get("GEMINI_MODEL", "gemini/gemini-2.0-flash"),
+        api_key=os.environ["GEMINI_API_KEY"],
+        temperature=0.3,
+    )
+
+def _run_async(coro):
+    main_loop = get_main_loop()
+    if main_loop and main_loop.is_running():
+        future = asyncio.run_coroutine_threadsafe(coro, main_loop)
+        return future.result()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        import nest_asyncio
+
+        nest_asyncio.apply()
+        return loop.run_until_complete(coro)
+    return asyncio.run(coro)
 
 EXPECTED_JSON_SHAPE = """{
   "problem": "string",
@@ -50,7 +73,7 @@ def _build_agent() -> Agent:
             "invent progress, metrics, or features to make the pitch sound "
             "more complete than the team's actual work."
         ),
-        llm=MODEL,
+        llm=_get_llm(),
         verbose=False,
         allow_delegation=False,
     )
@@ -103,11 +126,11 @@ def run_pitch(team_id: int) -> dict:
     Synchronous entry point — this is the only function main.py (or the
     manual /trigger-pitch/{team_id} endpoint) should call.
     """
-    team = asyncio.run(queries.get_team_by_id(team_id))
+    team = _run_async(queries.get_team_by_id(team_id))
     if team is None:
         raise ValueError(f"run_pitch called with unknown team_id={team_id}")
 
-    checkins = asyncio.run(queries.get_checkins(team_id))
+    checkins = _run_async(queries.get_checkins(team_id))
 
     pitch_context = {
         "team_name": team.get("team_name"),
@@ -124,6 +147,7 @@ def run_pitch(team_id: int) -> dict:
 
     result = crew.kickoff()
     return _parse_json_response(str(result))
+
 
 
 if __name__ == "__main__":

@@ -18,15 +18,16 @@ import os
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from db import queries
+from db import connection, queries
 from agents.blocker import run_blocker_check
 import telegram_client as tg
 
 
 async def _run_checks_for_all_teams():
-    pool = queries._get_pool()
+    pool = await connection.get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT id, chat_id, deadline FROM teams WHERE deadline IS NOT NULL")
+
 
     for row in rows:
         team_id, chat_id = row["id"], row["chat_id"]
