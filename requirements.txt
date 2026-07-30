@@ -1,0 +1,6 @@
+crewai
+fastapi
+python-telegram-bot
+asyncpg
+anthropic
+apscheduler
