@@ -132,7 +132,7 @@ async def telegram_webhook(request: Request):
 
         await queries.log_raw_message(team_id, author, text)
 
-        if team.get("headcount") is None or not team.get("skills"):
+        if team.get("deadline") is None:
             await _extract_onboarding_info(team_id, text)
             await tg.send_message(
                 chat_id,

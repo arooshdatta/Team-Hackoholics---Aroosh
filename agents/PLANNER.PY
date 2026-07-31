@@ -83,7 +83,7 @@ def _build_agent() -> Agent:
             "demo prep."
         ),
         llm=_get_llm(),
-        verbose=True,
+        verbose=False,
         allow_delegation=False,
     )
 

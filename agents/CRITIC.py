@@ -86,7 +86,7 @@ def _build_agent() -> Agent:
             "demo, not to be nice."
         ),
         llm=_get_llm(),
-        verbose=True,
+        verbose=False,
         allow_delegation=False,
     )
 

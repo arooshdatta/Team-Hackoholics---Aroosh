@@ -77,7 +77,7 @@ def _build_agent() -> Agent:
             "evidence actually supports."
         ),
         llm=_get_llm(),
-        verbose=True,
+        verbose=False,
         allow_delegation=False,
     )
 
