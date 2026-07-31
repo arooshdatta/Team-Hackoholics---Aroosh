@@ -74,7 +74,7 @@ def _build_agent() -> Agent:
             "more complete than the team's actual work."
         ),
         llm=_get_llm(),
-        verbose=False,
+        verbose=True,
         allow_delegation=False,
     )
 
